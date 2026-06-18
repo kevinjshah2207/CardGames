@@ -56,4 +56,4 @@ components/
 
 ## License
 
-MIT
+Copyright (c) 2026 Kevin Shah. All rights reserved. See [LICENSE](LICENSE).
