@@ -1,6 +1,7 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle, ActivityIndicator } from 'react-native';
-import { colors, radius, spacing } from '@/lib/theme';
+import { Pressable, Text, StyleSheet, ViewStyle, ActivityIndicator } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
+import { colors, radius, spacing, fonts } from '@/lib/theme';
 
 interface Props {
   label: string;
@@ -11,26 +12,34 @@ interface Props {
   style?: ViewStyle;
 }
 
-export function Button({ label, onPress, variant = 'primary', disabled, loading, style }: Props) {
-  const bg =
-    variant === 'primary' ? colors.primary :
-    variant === 'danger' ? colors.danger :
-    variant === 'secondary' ? colors.surfaceAlt :
-    'transparent';
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-  const textColor =
-    variant === 'ghost' ? colors.primary : colors.textPrimary;
+export function Button({ label, onPress, variant = 'primary', disabled, loading, style }: Props) {
+  const scale = useSharedValue(1);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  let bg = 'transparent';
+  if (variant === 'primary') bg = colors.primary;
+  else if (variant === 'danger') bg = colors.danger;
+  else if (variant === 'secondary') bg = colors.surfaceAlt;
+
+  const textColor = variant === 'ghost' ? colors.primary : colors.textPrimary;
 
   return (
-    <TouchableOpacity
+    <AnimatedPressable
       onPress={onPress}
       disabled={disabled || loading}
-      activeOpacity={0.75}
+      onPressIn={() => { scale.value = withSpring(0.96, { damping: 15, stiffness: 400 }); }}
+      onPressOut={() => { scale.value = withSpring(1, { damping: 15, stiffness: 400 }); }}
       style={[
         styles.base,
         { backgroundColor: bg },
         variant === 'ghost' && styles.ghost,
         (disabled || loading) && styles.disabled,
+        animStyle,
         style,
       ]}
     >
@@ -39,7 +48,7 @@ export function Button({ label, onPress, variant = 'primary', disabled, loading,
       ) : (
         <Text style={[styles.label, { color: textColor }]}>{label}</Text>
       )}
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
@@ -56,5 +65,5 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
   },
   disabled: { opacity: 0.4 },
-  label: { fontSize: 16, fontWeight: '600', letterSpacing: 0.3 },
+  label: { fontSize: 16, fontFamily: fonts.semiBold, letterSpacing: 0.2 },
 });

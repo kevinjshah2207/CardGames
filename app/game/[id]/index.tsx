@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius, spacing } from '@/lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { colors, radius, spacing, fonts } from '@/lib/theme';
 import { useGameStore } from '@/lib/store';
 import { getLeaderboard } from '@/lib/scoring';
 import { Button } from '@/components/Button';
@@ -58,8 +57,12 @@ export default function GameScreen() {
     ]);
   };
 
-  const rankEmoji = (rank: number) =>
-    rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+  const rankLabel = (rank: number) => {
+    if (rank === 1) return '🥇';
+    if (rank === 2) return '🥈';
+    if (rank === 3) return '🥉';
+    return `#${rank}`;
+  };
 
   return (
     <>
@@ -67,11 +70,11 @@ export default function GameScreen() {
         options={{
           title: game.status === 'completed' ? 'Game Over' : 'Scoreboard',
           headerRight: () => (
-            <TouchableOpacity onPress={handleDelete} activeOpacity={0.75}>
+            <Pressable onPress={handleDelete} hitSlop={8}>
               <View style={styles.deleteBtn}>
                 <Ionicons name="trash-outline" size={18} color="#fff" />
               </View>
-            </TouchableOpacity>
+            </Pressable>
           ),
         }}
       />
@@ -79,53 +82,57 @@ export default function GameScreen() {
         <ScrollView style={styles.scroll} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           {game.status === 'completed' && (
             <View style={styles.completedBanner}>
-              <Text style={styles.completedText}>🏆 Game Complete</Text>
+              <Text style={styles.completedText}>🏆  Game Complete</Text>
             </View>
           )}
 
-          {/* Leaderboard */}
           <View style={styles.leaderboard}>
-            {leaderboard.map((entry, i) => (
-              <View
-                key={entry.playerId}
-                style={[
-                  styles.playerRow,
-                  i === 0 && styles.playerRowFirst,
-                ]}
-              >
-                <Text style={styles.rankEmoji}>{rankEmoji(entry.rank)}</Text>
-                <Text style={[styles.playerName, i === 0 && styles.playerNameFirst]}>
-                  {entry.name}
-                </Text>
-                <View style={[styles.scorePill, i === 0 && styles.scorePillFirst]}>
-                  <Text style={[styles.scoreText, i === 0 && styles.scoreTextFirst]}>
-                    {entry.total}
-                  </Text>
+            {leaderboard.map((entry, i) => {
+              const isLeader = i === 0;
+              return (
+                <View key={entry.playerId} style={styles.playerRowWrap}>
+                  {isLeader && (
+                    <LinearGradient
+                      colors={[colors.primary + '30', colors.primary + '08']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                  )}
+                  <View style={[styles.playerRow, !isLeader && styles.playerRowBorder]}>
+                    <Text style={styles.rankEmoji}>{rankLabel(entry.rank)}</Text>
+                    <Text style={[styles.playerName, isLeader && styles.playerNameLeader]}>
+                      {entry.name}
+                    </Text>
+                    <View style={[styles.scorePill, isLeader && styles.scorePillLeader]}>
+                      <Text style={[styles.scoreText, isLeader && styles.scoreTextLeader]}>
+                        {entry.total}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
-          {/* Round history toggle */}
           {game.rounds.length > 0 && (
-            <TouchableOpacity
+            <Pressable
               style={styles.roundsToggle}
               onPress={() => setShowRounds((v) => !v)}
-              activeOpacity={0.7}
             >
               <Text style={styles.roundsToggleText}>
                 {showRounds ? '▲' : '▼'}  {game.rounds.length} Round{game.rounds.length !== 1 ? 's' : ''} Played
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           )}
 
           {showRounds && (
             <View style={styles.roundsList}>
-              {game.rounds.map((round, roundIndex) => (
+              {game.rounds.map((round, idx) => (
                 <RoundSummaryCard
                   key={round.id}
                   round={round}
-                  roundNumber={roundIndex + 1}
+                  roundNumber={idx + 1}
                   players={game.players}
                 />
               ))}
@@ -138,13 +145,13 @@ export default function GameScreen() {
             <Button
               label="+ New Round"
               onPress={() => router.push(`/game/${id}/round`)}
-              style={styles.newRoundBtn}
+              style={styles.actionBtn}
             />
             <Button
               label="End Game"
               onPress={handleEndGame}
               variant="ghost"
-              style={styles.endBtn}
+              style={styles.actionBtn}
             />
           </View>
         )}
@@ -162,8 +169,7 @@ function RoundSummaryCard({
 }) {
   const nameOf = (id: string) => players.find((p) => p.id === id)?.name ?? id;
   const declarerScore = round.scores.find((s) => s.playerId === round.declarerId);
-  const declarerWon = declarerScore?.roundScore === 0 ||
-    (declarerScore?.roundScore ?? 0) < Math.max(...round.entries.map((e) => e.handTotal)) * 2;
+  const declarerWon = declarerScore?.roundScore === 0;
 
   return (
     <View style={styles.roundCard}>
@@ -179,8 +185,8 @@ function RoundSummaryCard({
           <View style={styles.roundScoreRight}>
             <Text style={[
               styles.roundScoreDelta,
-              s.roundScore === 0 && styles.roundScoreGreen,
-              s.roundScore > 20 && styles.roundScoreRed,
+              s.roundScore === 0 && styles.scoreGreen,
+              s.roundScore > 20 && styles.scoreRed,
             ]}>
               +{s.roundScore}
             </Text>
@@ -200,13 +206,12 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
   },
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { flex: 1 },
   container: { padding: spacing.md, paddingBottom: 40 },
   notFound: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  notFoundText: { color: colors.textSecondary },
+  notFoundText: { fontFamily: fonts.regular, color: colors.textSecondary },
   completedBanner: {
     backgroundColor: colors.gold + '22',
     borderRadius: radius.md,
@@ -214,25 +219,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  completedText: { fontSize: 16, fontWeight: '700', color: colors.gold },
+  completedText: { fontSize: 16, fontFamily: fonts.bold, color: colors.gold },
   leaderboard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     overflow: 'hidden',
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
+  playerRowWrap: { overflow: 'hidden' },
   playerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
     gap: spacing.sm,
   },
-  playerRowFirst: { backgroundColor: colors.primary + '18' },
-  rankEmoji: { fontSize: 20, width: 30 },
-  playerName: { flex: 1, fontSize: 16, fontWeight: '600', color: colors.textPrimary },
-  playerNameFirst: { color: colors.primaryLight },
+  playerRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  rankEmoji: { fontSize: 20, width: 32 },
+  playerName: { flex: 1, fontSize: 16, fontFamily: fonts.semiBold, color: colors.textPrimary },
+  playerNameLeader: { fontFamily: fonts.bold, color: colors.primaryLight },
   scorePill: {
     backgroundColor: colors.surfaceAlt,
     borderRadius: 20,
@@ -241,22 +251,26 @@ const styles = StyleSheet.create({
     minWidth: 54,
     alignItems: 'center',
   },
-  scorePillFirst: { backgroundColor: colors.primary },
-  scoreText: { fontSize: 15, fontWeight: '700', color: colors.textSecondary },
-  scoreTextFirst: { color: '#fff' },
+  scorePillLeader: { backgroundColor: colors.primary },
+  scoreText: { fontSize: 15, fontFamily: fonts.bold, color: colors.textSecondary },
+  scoreTextLeader: { color: '#fff' },
   roundsToggle: {
     padding: spacing.md,
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  roundsToggleText: { fontSize: 14, fontWeight: '600', color: colors.textSecondary },
+  roundsToggleText: { fontSize: 14, fontFamily: fonts.semiBold, color: colors.textSecondary },
   roundsList: { gap: spacing.sm },
   roundCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   roundCardHeader: {
     flexDirection: 'row',
@@ -266,21 +280,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  roundCardTitle: { fontSize: 14, fontWeight: '700', color: colors.textSecondary },
-  roundCardDeclarer: { fontSize: 13, color: colors.textMuted },
+  roundCardTitle: { fontSize: 13, fontFamily: fonts.bold, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 },
+  roundCardDeclarer: { fontSize: 13, fontFamily: fonts.regular, color: colors.textMuted },
   roundScoreRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 4,
   },
-  roundScoreName: { fontSize: 14, color: colors.textPrimary },
+  roundScoreName: { fontSize: 14, fontFamily: fonts.regular, color: colors.textPrimary },
   roundScoreRight: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
-  roundScoreDelta: { fontSize: 14, fontWeight: '600', color: colors.textSecondary, width: 48, textAlign: 'right' },
-  roundScoreGreen: { color: colors.success },
-  roundScoreRed: { color: colors.danger },
-  roundScoreTotal: { fontSize: 14, fontWeight: '700', color: colors.textPrimary, width: 48, textAlign: 'right' },
+  roundScoreDelta: { fontSize: 14, fontFamily: fonts.semiBold, color: colors.textSecondary, width: 48, textAlign: 'right' },
+  scoreGreen: { color: colors.success },
+  scoreRed: { color: colors.danger },
+  roundScoreTotal: { fontSize: 14, fontFamily: fonts.bold, color: colors.textPrimary, width: 48, textAlign: 'right' },
   footer: { padding: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
-  newRoundBtn: { width: '100%' },
-  endBtn: { width: '100%' },
+  actionBtn: { width: '100%' },
 });

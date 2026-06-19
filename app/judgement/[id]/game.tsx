@@ -1,18 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TextInput,
-  TouchableOpacity, KeyboardAvoidingView, Platform,
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import { colors, radius, spacing } from '@/lib/theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { colors, radius, spacing, fonts } from '@/lib/theme';
 import { useJudgementStore } from '@/lib/judgement-store';
 import {
   getGameSequence, getTrumpForGame, getDealerIndex, getBidOrder, getForbiddenBid,
 } from '@/lib/judgement-scoring';
 import { TRUMP_LABEL, TRUMP_COLOR, JudgementBid, JudgementHands } from '@/lib/judgement-types';
 import { Button } from '@/components/Button';
+import { Stepper } from '@/components/Stepper';
 
 export default function GameEntryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -21,8 +20,8 @@ export default function GameEntryScreen() {
   const addGame = useJudgementStore((s) => s.addGame);
 
   const [phase, setPhase] = useState<'bids' | 'hands'>('bids');
-  const [bids, setBids] = useState<Record<string, string>>({});
-  const [hands, setHands] = useState<Record<string, string>>({});
+  const [bids, setBids] = useState<Record<string, number>>({});
+  const [hands, setHands] = useState<Record<string, number>>({});
 
   if (!session) {
     return (
@@ -48,37 +47,29 @@ export default function GameEntryScreen() {
   const bidOrderPlayers = bidOrderIndices.map(i => session.players[i]);
 
   // ── Bid phase helpers ──────────────────────────────────────────────────
-  const parsedBids = bidOrderPlayers.map(p => {
-    const raw = bids[p.id] ?? '';
-    const val = parseInt(raw, 10);
-    return { player: p, raw, val, entered: raw !== '' && !isNaN(val) };
-  });
-
-  const allBidsEntered = parsedBids.every(b => b.entered);
-  const bidTotal = parsedBids.filter(b => b.entered).reduce((s, b) => s + b.val, 0);
-
-  const nonDealerParsed = parsedBids.filter(b => b.player.id !== dealer.id);
-  const nonDealerAllEntered = nonDealerParsed.every(b => b.entered);
-  const nonDealerTotal = nonDealerParsed.filter(b => b.entered).reduce((s, b) => s + b.val, 0);
-  const rawForbidden = nonDealerAllEntered ? getForbiddenBid(nonDealerParsed.filter(b => b.entered).map(b => b.val), cardCount) : null;
+  const nonDealerBids = bidOrderPlayers
+    .filter(p => p.id !== dealer.id)
+    .map(p => bids[p.id] ?? 0);
+  const nonDealerAllSet = bidOrderPlayers
+    .filter(p => p.id !== dealer.id)
+    .every(p => bids[p.id] !== undefined);
+  const rawForbidden = nonDealerAllSet ? getForbiddenBid(nonDealerBids, cardCount) : null;
   const forbiddenBid = rawForbidden !== null && rawForbidden >= 0 && rawForbidden <= cardCount ? rawForbidden : null;
 
-  const dealerBidRaw = bids[dealer.id] ?? '';
-  const dealerBidVal = parseInt(dealerBidRaw, 10);
-  const dealerBidForbidden = forbiddenBid !== null && !isNaN(dealerBidVal) && dealerBidVal === forbiddenBid;
-  const bidsValid = allBidsEntered && !dealerBidForbidden;
+  const allBidsSet = bidOrderPlayers.every(p => bids[p.id] !== undefined);
+  const dealerBidForbidden = forbiddenBid !== null && bids[dealer.id] === forbiddenBid;
+  const bidsValid = allBidsSet && !dealerBidForbidden;
 
   // ── Hands phase helpers ────────────────────────────────────────────────
-  const parsedHands = session.players.map(p => {
-    const raw = hands[p.id] ?? '';
-    const val = parseInt(raw, 10);
-    const bid = parsedBids.find(b => b.player.id === p.id);
-    return { player: p, raw, val, entered: raw !== '' && !isNaN(val), bidVal: bid?.val ?? 0 };
-  });
+  const allHandsSet = session.players.every(p => hands[p.id] !== undefined);
+  const handTotal = session.players.reduce((s, p) => s + (hands[p.id] ?? 0), 0);
+  const handTotalValid = allHandsSet && handTotal === cardCount;
 
-  const allHandsEntered = parsedHands.every(t => t.entered);
-  const handTotal = parsedHands.filter(t => t.entered).reduce((s, t) => s + t.val, 0);
-  const handTotalValid = allHandsEntered && handTotal === cardCount;
+  const setBid = (playerId: string, val: number) =>
+    setBids(b => ({ ...b, [playerId]: val }));
+
+  const setHand = (playerId: string, val: number) =>
+    setHands(h => ({ ...h, [playerId]: val }));
 
   const handleLockBids = () => {
     if (!bidsValid) return;
@@ -88,95 +79,89 @@ export default function GameEntryScreen() {
 
   const handleConfirm = () => {
     if (!handTotalValid) return;
-    const gameBids: JudgementBid[] = parsedBids.map(b => ({ playerId: b.player.id, bid: b.val }));
-    const gameHands: JudgementHands[] = parsedHands.map(t => ({ playerId: t.player.id, hands: t.val }));
+    const gameBids: JudgementBid[] = bidOrderPlayers.map(p => ({ playerId: p.id, bid: bids[p.id] ?? 0 }));
+    const gameHands: JudgementHands[] = session.players.map(p => ({ playerId: p.id, hands: hands[p.id] ?? 0 }));
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     addGame(id, gameBids, gameHands);
     router.back();
   };
 
-  // ── Game info banner ───────────────────────────────────────────────────
+  const trumpColor = TRUMP_COLOR[trumpSuit];
+
   const gameBanner = (
     <View style={styles.gameBanner}>
-      <Text style={styles.gameBannerTitle}>
-        Game {gameIndex + 1}  ·  {cardCount} card{cardCount !== 1 ? 's' : ''}
-      </Text>
-      <Text style={[styles.gameBannerTrump, { color: TRUMP_COLOR[trumpSuit] }]}>
-        {TRUMP_LABEL[trumpSuit]} trump  ·  {dealer.name} deals
-      </Text>
+      <LinearGradient
+        colors={[trumpColor + '20', trumpColor + '06']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[styles.bannerAccent, { backgroundColor: trumpColor }]} />
+      <View style={styles.bannerContent}>
+        <Text style={styles.gameBannerTitle}>
+          Game {gameIndex + 1} · {cardCount} card{cardCount !== 1 ? 's' : ''}
+        </Text>
+        <Text style={[styles.gameBannerTrump, { color: trumpColor }]}>
+          {TRUMP_LABEL[trumpSuit]} trump · {dealer.name} deals
+        </Text>
+      </View>
     </View>
   );
 
   // ── Bids phase ─────────────────────────────────────────────────────────
   if (phase === 'bids') {
+    const bidTotal = bidOrderPlayers.reduce((s, p) => s + (bids[p.id] ?? 0), 0);
     return (
       <>
         <Stack.Screen options={{ title: `Game ${gameIndex + 1} · Bids` }} />
         <SafeAreaView style={styles.safe} edges={['bottom']}>
-          <KeyboardAvoidingView
-            style={styles.flex}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={88}
-          >
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.container}
-              keyboardShouldPersistTaps="handled"
-            >
-              {gameBanner}
+          <ScrollView style={styles.scroll} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+            {gameBanner}
 
-              <Text style={styles.sectionLabel}>Bids  (bid order)</Text>
+            <Text style={styles.sectionLabel}>Bids — in bid order</Text>
 
-              {parsedBids.map((item, i) => {
-                const isDealer = item.player.id === dealer.id;
-                const showForbidden = isDealer && forbiddenBid !== null;
-                const isInvalid = isDealer && dealerBidForbidden;
-                return (
-                  <View key={item.player.id} style={styles.entryRow}>
-                    <View style={styles.entryLeft}>
-                      <Text style={[styles.entryName, isDealer && styles.entryNameDealer]}>
-                        {item.player.name}{isDealer ? '  🎯 dealer' : ''}
+            {bidOrderPlayers.map((player) => {
+              const isDealer = player.id === dealer.id;
+              const currentBid = bids[player.id] ?? 0;
+              const isInvalid = isDealer && forbiddenBid !== null && currentBid === forbiddenBid;
+              return (
+                <View key={player.id} style={[styles.entryRow, isInvalid && styles.entryRowInvalid]}>
+                  <View style={styles.entryLeft}>
+                    <Text style={[styles.entryName, isDealer && styles.entryNameDealer]}>
+                      {player.name}{isDealer ? '  🎯' : ''}
+                    </Text>
+                    {isDealer && forbiddenBid !== null && (
+                      <Text style={[styles.forbidden, isInvalid && styles.forbiddenActive]}>
+                        {isInvalid ? '⛔' : '⚠️'} Cannot bid {forbiddenBid}
                       </Text>
-                      {showForbidden && (
-                        <Text style={[styles.forbidden, isInvalid && styles.forbiddenActive]}>
-                          {isInvalid ? '⛔ ' : '⚠️ '}Cannot bid {forbiddenBid}
-                        </Text>
-                      )}
-                    </View>
-                    <TextInput
-                      style={[styles.numInput, isInvalid && styles.numInputInvalid]}
-                      value={item.raw}
-                      onChangeText={v => setBids(b => ({ ...b, [item.player.id]: v.replace(/[^0-9]/g, '') }))}
-                      keyboardType="number-pad"
-                      placeholder="–"
-                      placeholderTextColor={colors.textMuted}
-                      maxLength={2}
-                    />
+                    )}
                   </View>
-                );
-              })}
+                  <Stepper
+                    value={currentBid}
+                    min={0}
+                    max={cardCount}
+                    onChange={(val) => setBid(player.id, val)}
+                    forbidden={isDealer ? forbiddenBid : null}
+                  />
+                </View>
+              );
+            })}
 
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total bids</Text>
-                <Text style={[
-                  styles.totalValue,
-                  allBidsEntered && bidTotal === cardCount && styles.totalValueBad,
-                  allBidsEntered && bidTotal !== cardCount && styles.totalValueGood,
-                ]}>
-                  {bidTotal} / {cardCount}
-                </Text>
-              </View>
-            </ScrollView>
-
-            <View style={styles.footer}>
-              <Button
-                label="Lock In Bids →"
-                onPress={handleLockBids}
-                disabled={!bidsValid}
-                style={styles.actionBtn}
-              />
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total bids</Text>
+              <Text style={[
+                styles.totalValue,
+                allBidsSet && bidTotal === cardCount && styles.totalValueBad,
+                allBidsSet && bidTotal !== cardCount && styles.totalValueGood,
+              ]}>
+                {bidTotal} / {cardCount}
+              </Text>
             </View>
-          </KeyboardAvoidingView>
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <Button label="Lock In Bids →" onPress={handleLockBids} disabled={!bidsValid} style={styles.actionBtn} />
+          </View>
         </SafeAreaView>
       </>
     );
@@ -185,98 +170,78 @@ export default function GameEntryScreen() {
   // ── Hands phase ────────────────────────────────────────────────────────
   return (
     <>
-      <Stack.Screen options={{ title: `Game ${gameIndex + 1} · Hands` }} />
+      <Stack.Screen options={{ title: `Game ${gameIndex + 1} · Hands Won` }} />
       <SafeAreaView style={styles.safe} edges={['bottom']}>
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={88}
-        >
-          <ScrollView
-            style={styles.scroll}
-            contentContainerStyle={styles.container}
-            keyboardShouldPersistTaps="handled"
-          >
-            {gameBanner}
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+          {gameBanner}
 
-            {/* Bids recap */}
-            <View style={styles.bidsRecap}>
-              <Text style={styles.bidsRecapLabel}>Bids locked  </Text>
-              <Text style={styles.bidsRecapValue}>
-                {parsedBids.map(b => `${b.player.name} ${b.val}`).join('  ·  ')}
-              </Text>
-            </View>
-
-            <Text style={styles.sectionLabel}>Hands Won</Text>
-
-            {parsedHands.map((item) => {
-              const correct = item.entered && item.val === item.bidVal;
-              const wrong = item.entered && item.val !== item.bidVal;
-              const gameScore = item.entered ? (correct ? item.bidVal + 10 : 0) : null;
-              return (
-                <View key={item.player.id} style={styles.entryRow}>
-                  <View style={styles.entryLeft}>
-                    <Text style={styles.entryName}>{item.player.name}</Text>
-                    <Text style={styles.entryBid}>bid {item.bidVal}</Text>
-                  </View>
-                  <TextInput
-                    style={[
-                      styles.numInput,
-                      item.entered && correct && styles.numInputGood,
-                      item.entered && wrong && styles.numInputBad,
-                    ]}
-                    value={item.raw}
-                    onChangeText={v => setHands(h => ({ ...h, [item.player.id]: v.replace(/[^0-9]/g, '') }))}
-                    keyboardType="number-pad"
-                    placeholder="–"
-                    placeholderTextColor={colors.textMuted}
-                    maxLength={2}
-                  />
-                  {gameScore !== null && (
-                    <View style={styles.scorePreview}>
-                      <Text style={[styles.scorePreviewText, correct ? styles.scoreGreen : styles.scoreRed]}>
-                        +{gameScore}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-
-            <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Total hands</Text>
-              <Text style={[
-                styles.totalValue,
-                allHandsEntered && !handTotalValid && styles.totalValueBad,
-                handTotalValid && styles.totalValueGood,
-              ]}>
-                {handTotal} / {cardCount}
-              </Text>
-            </View>
-
-            {allHandsEntered && !handTotalValid && (
-              <Text style={styles.trickError}>
-                Total must equal {cardCount} (currently {handTotal})
-              </Text>
-            )}
-          </ScrollView>
-
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={styles.backToPhase}
-              onPress={() => setPhase('bids')}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.backToPhaseText}>← Edit Bids</Text>
-            </TouchableOpacity>
-            <Button
-              label="Confirm Game"
-              onPress={handleConfirm}
-              disabled={!handTotalValid}
-              style={styles.actionBtn}
-            />
+          <View style={styles.bidsRecap}>
+            <Text style={styles.bidsRecapLabel}>Bids locked  </Text>
+            <Text style={styles.bidsRecapValue}>
+              {bidOrderPlayers.map(p => `${p.name} ${bids[p.id] ?? 0}`).join('  ·  ')}
+            </Text>
           </View>
-        </KeyboardAvoidingView>
+
+          <Text style={styles.sectionLabel}>Hands Won</Text>
+
+          {session.players.map((player) => {
+            const bidVal = bids[player.id] ?? 0;
+            const handsVal = hands[player.id] ?? 0;
+            const hasEntry = hands[player.id] !== undefined;
+            const correct = hasEntry && handsVal === bidVal;
+            const wrong = hasEntry && handsVal !== bidVal;
+            let gameScore: number | null = null;
+            if (hasEntry) gameScore = correct ? bidVal + 10 : 0;
+
+            const scoreStyle = correct ? styles.scoreGreen : styles.scoreRed;
+
+            return (
+              <View key={player.id} style={styles.entryRow}>
+                <View style={styles.entryLeft}>
+                  <Text style={styles.entryName}>{player.name}</Text>
+                  <Text style={styles.entryBid}>bid {bidVal}</Text>
+                </View>
+                <Stepper
+                  value={handsVal}
+                  min={0}
+                  max={cardCount}
+                  onChange={(val) => setHand(player.id, val)}
+                />
+                {gameScore !== null && (
+                  <View style={styles.scorePreview}>
+                    <Text style={[styles.scorePreviewText, scoreStyle]}>
+                      +{gameScore}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total hands</Text>
+            <Text style={[
+              styles.totalValue,
+              allHandsSet && !handTotalValid && styles.totalValueBad,
+              handTotalValid && styles.totalValueGood,
+            ]}>
+              {handTotal} / {cardCount}
+            </Text>
+          </View>
+
+          {allHandsSet && !handTotalValid && (
+            <Text style={styles.trickError}>
+              Total must equal {cardCount} (currently {handTotal})
+            </Text>
+          )}
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <Pressable style={styles.backToPhase} onPress={() => setPhase('bids')}>
+            <Text style={styles.backToPhaseText}>← Edit Bids</Text>
+          </Pressable>
+          <Button label="Confirm Game" onPress={handleConfirm} disabled={!handTotalValid} style={styles.actionBtn} />
+        </View>
       </SafeAreaView>
     </>
   );
@@ -284,25 +249,27 @@ export default function GameEntryScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  flex: { flex: 1 },
   scroll: { flex: 1 },
   container: { padding: spacing.md, paddingBottom: 20 },
   notFound: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  notFoundText: { color: colors.textSecondary },
+  notFoundText: { fontFamily: fonts.regular, color: colors.textSecondary },
   gameBanner: {
-    backgroundColor: colors.surface,
     borderRadius: radius.md,
-    padding: spacing.md,
     marginBottom: spacing.md,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  gameBannerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
-  gameBannerTrump: { fontSize: 14, fontWeight: '600' },
+  bannerAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
+  bannerContent: { padding: spacing.md, paddingLeft: spacing.md + 3 },
+  gameBannerTitle: { fontSize: 17, fontFamily: fonts.bold, color: colors.textPrimary, marginBottom: 2 },
+  gameBannerTrump: { fontSize: 14, fontFamily: fonts.semiBold },
   sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 11,
+    fontFamily: fonts.extraBold,
     color: colors.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     marginBottom: spacing.sm,
   },
   entryRow: {
@@ -313,31 +280,18 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.sm,
     gap: spacing.sm,
-  },
-  entryLeft: { flex: 1 },
-  entryName: { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
-  entryNameDealer: { color: colors.primaryLight },
-  entryBid: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
-  forbidden: { fontSize: 12, color: colors.accent, marginTop: 3, fontWeight: '600' },
-  forbiddenActive: { color: colors.danger },
-  numInput: {
-    width: 60,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 12,
-    fontSize: 22,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    textAlign: 'center',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: colors.border,
   },
-  numInputInvalid: { borderColor: colors.danger },
-  numInputGood: { borderColor: colors.success },
-  numInputBad: { borderColor: colors.danger },
+  entryRowInvalid: { borderColor: colors.danger },
+  entryLeft: { flex: 1 },
+  entryName: { fontSize: 16, fontFamily: fonts.semiBold, color: colors.textPrimary },
+  entryNameDealer: { color: colors.primaryLight },
+  entryBid: { fontSize: 13, fontFamily: fonts.regular, color: colors.textMuted, marginTop: 2 },
+  forbidden: { fontSize: 12, fontFamily: fonts.semiBold, color: colors.accent, marginTop: 3 },
+  forbiddenActive: { color: colors.danger },
   scorePreview: { width: 44, alignItems: 'center' },
-  scorePreviewText: { fontSize: 14, fontWeight: '700' },
+  scorePreviewText: { fontSize: 14, fontFamily: fonts.bold },
   scoreGreen: { color: colors.success },
   scoreRed: { color: colors.danger },
   totalRow: {
@@ -348,11 +302,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     marginTop: 4,
   },
-  totalLabel: { fontSize: 14, color: colors.textMuted, fontWeight: '600' },
-  totalValue: { fontSize: 18, fontWeight: '700', color: colors.textSecondary },
+  totalLabel: { fontSize: 14, fontFamily: fonts.semiBold, color: colors.textMuted },
+  totalValue: { fontSize: 18, fontFamily: fonts.bold, color: colors.textSecondary },
   totalValueGood: { color: colors.success },
   totalValueBad: { color: colors.danger },
-  trickError: { textAlign: 'center', fontSize: 13, color: colors.danger, marginTop: -4, marginBottom: 4 },
+  trickError: { textAlign: 'center', fontSize: 13, fontFamily: fonts.regular, color: colors.danger, marginTop: -4, marginBottom: 4 },
   bidsRecap: {
     backgroundColor: colors.surfaceAlt,
     borderRadius: radius.md,
@@ -361,11 +315,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  bidsRecapLabel: { fontSize: 12, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 },
-  bidsRecapValue: { fontSize: 12, color: colors.textSecondary, flex: 1 },
+  bidsRecapLabel: { fontSize: 11, fontFamily: fonts.extraBold, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 },
+  bidsRecapValue: { fontSize: 12, fontFamily: fonts.regular, color: colors.textSecondary, flex: 1 },
   footer: { padding: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
   backToPhase: { alignItems: 'center', paddingVertical: 6 },
-  backToPhaseText: { fontSize: 14, color: colors.primary, fontWeight: '600' },
+  backToPhaseText: { fontSize: 14, fontFamily: fonts.semiBold, color: colors.primary },
   actionBtn: { width: '100%' },
 });

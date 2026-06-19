@@ -28,3 +28,10 @@ export const spacing = {
   lg: 24,
   xl: 32,
 };
+
+export const fonts = {
+  regular: 'Inter_400Regular',
+  semiBold: 'Inter_600SemiBold',
+  bold: 'Inter_700Bold',
+  extraBold: 'Inter_800ExtraBold',
+};
